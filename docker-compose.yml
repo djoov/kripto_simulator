@@ -1,0 +1,109 @@
+# ============================================================
+#  Kripto Simulator — Docker Compose
+#  Services:
+#    nginx   → Web server (port 80)
+#    laravel → PHP-FPM 8.3 (Laravel API Gateway)
+#    python  → Python 3.11 (ChaCha20 FastAPI microservice)
+#    mysql   → MySQL 8.0 (Database)
+# ============================================================
+
+services:
+
+  # ─────────────────────────────────────────────
+  #  NGINX — Web Server
+  # ─────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: kripto_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - .:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - laravel
+    networks:
+      - kripto_net
+
+  # ─────────────────────────────────────────────
+  #  LARAVEL — PHP-FPM (API Gateway)
+  # ─────────────────────────────────────────────
+  laravel:
+    build:
+      context: .
+      dockerfile: docker/laravel/Dockerfile
+    container_name: kripto_laravel
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - ./storage:/var/www/html/storage
+    env_file:
+      - .env          # ← inject semua var dari .env host (termasuk APP_KEY)
+    environment:
+      # Override nilai spesifik yang berbeda di Docker vs lokal:
+      DB_HOST: mysql                            # nama service Docker, bukan 127.0.0.1
+      CHACHA20_SERVICE_URL: http://python:8001  # nama service Docker, bukan localhost
+      CHACHA20_SERVICE_TIMEOUT: 30
+    depends_on:
+      mysql:
+        condition: service_healthy
+      python:
+        condition: service_started
+    networks:
+      - kripto_net
+
+  # ─────────────────────────────────────────────
+  #  PYTHON — ChaCha20 FastAPI Microservice
+  # ─────────────────────────────────────────────
+  python:
+    build:
+      context: ./chacha20-api
+      dockerfile: ../docker/python/Dockerfile
+    container_name: kripto_python
+    restart: unless-stopped
+    ports:
+      - "8001:8001"   # expose untuk debug lokal; bisa dihapus di production
+    networks:
+      - kripto_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─────────────────────────────────────────────
+  #  MYSQL — Database
+  # ─────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: kripto_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-kripto_simulator}
+      # Jika DB_USERNAME=root, JANGAN set MYSQL_USER (MySQL image melarang MYSQL_USER=root)
+      # Gunakan MYSQL_ROOT_PASSWORD saja. Laravel connect dengan username root & root password.
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"   # expose untuk akses via TablePlus/phpMyAdmin
+    networks:
+      - kripto_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD:-secret}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ─────────────────────────────────────────────
+#  Networks & Volumes
+# ─────────────────────────────────────────────
+networks:
+  kripto_net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local

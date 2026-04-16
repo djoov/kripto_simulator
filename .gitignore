@@ -23,3 +23,10 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Python virtual environment
+.venv
+chacha20-api/.venv
+**/__pycache__
+*.pyc
+*.pyo

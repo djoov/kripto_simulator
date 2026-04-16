@@ -1,0 +1,32 @@
+# ── Laravel ──
+node_modules
+vendor
+.venv
+storage/logs/*.log
+storage/framework/cache
+storage/framework/sessions
+storage/framework/views
+bootstrap/cache/*.php
+public/hot
+public/build
+.env
+
+# ── Python ──
+chacha20-api/.venv
+chacha20-api/__pycache__
+chacha20-api/*.pyc
+
+# ── Git ──
+.git
+.gitattributes
+.gitignore
+
+# ── Dev files ──
+*.md
+phpunit.xml
+tests/
+.editorconfig
+
+# ── Python ──
+chacha20-api/__pycache__
+chacha20-api/*.pyc
