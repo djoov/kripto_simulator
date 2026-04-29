@@ -1,12 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>ChaCha20 Simulator — NakamotoX</title>
-    <script src="//unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-    <style>
+import re
+
+with open('resources/views/chacha20/index.blade.php', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+new_html = """    <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
@@ -189,7 +186,7 @@
             0% { content: '|'; }
             25% { content: '/'; }
             50% { content: '-'; }
-            75% { content: '\'; }
+            75% { content: '\\'; }
         }
         
         /* Cursor blink */
@@ -211,7 +208,7 @@
 <header>
     <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
         <div>
-            <span class="prompt">root@nakamotox</span>:<span class="prompt-dir">~/chacha20</span>$ <span class="prompt-cmd">./run_simulator.sh</span><span class="cursor-blink"></span>
+            <span class="prompt">root@kripto-sim</span>:<span class="prompt-dir">~/chacha20</span>$ <span class="prompt-cmd">./run_simulator.sh</span><span class="cursor-blink"></span>
         </div>
         <div style="font-size: 12px; color: var(--muted);" x-text="serviceStatus">[ checking... ]</div>
     </div>
@@ -410,234 +407,13 @@
         </div>
     </div>
 </div>
+"""
 
-<script>
-function chacha20App() {
-    return {
-        // Config
-        apiUrl: '{{ $apiUrl }}',
-        csrfToken: document.querySelector('meta[name=csrf-token]').content,
+# Replace content using regex
+pattern = re.compile(r'    <style>.*?</style>\s*</head>\s*<body[^>]*>.*?(?=\n<script>)', re.DOTALL)
+new_content = pattern.sub(new_html, content)
 
-        // State
-        mode: 'encrypt',
-        loading: false,
-        serviceStatus: 'Checking…',
+with open('resources/views/chacha20/index.blade.php', 'w', encoding='utf-8') as f:
+    f.write(new_content)
 
-        // Form
-        plaintext: '',
-        ciphertextInput: '',
-        key: '',
-        nonce: '',
-        counter: 1,
-        showRounds: false,
-
-        // Errors
-        error: null,
-        keyError: null,
-        nonceError: null,
-
-        // Results
-        result: null,
-        stepsData: null,
-
-        // State Matrix Viewer
-        allRounds: [],
-        currentRoundIndex: 0,
-        currentRound: -1,
-        currentStateWords: [],
-        currentRoundLabel: '',
-        changedIndices: [],
-
-        async init() {
-            await this.checkService();
-        },
-
-        async checkService() {
-            try {
-                const res = await fetch('{{ route("chacha20.keygen") }}');
-                this.serviceStatus = res.ok ? '● Service Online' : '⚠ Service Error';
-            } catch {
-                this.serviceStatus = '✕ Service Offline';
-            }
-        },
-
-        resetResult() {
-            this.result = null;
-            this.stepsData = null;
-            this.error = null;
-        },
-
-        validate() {
-            this.keyError = null;
-            this.nonceError = null;
-
-            if (this.key && !/^[0-9a-fA-F]{64}$/.test(this.key)) {
-                this.keyError = 'Key harus tepat 64 karakter hexadecimal (256-bit).';
-                return false;
-            }
-            if (this.nonce && !/^[0-9a-fA-F]{24}$/.test(this.nonce)) {
-                this.nonceError = 'Nonce harus tepat 24 karakter hexadecimal (96-bit).';
-                return false;
-            }
-            return true;
-        },
-
-        async run() {
-            if (!this.validate()) return;
-            this.loading = true;
-            this.error = null;
-            this.result = null;
-            this.stepsData = null;
-
-            try {
-                if (this.mode === 'encrypt') await this.doEncrypt();
-                else if (this.mode === 'decrypt') await this.doDecrypt();
-                else await this.doSteps();
-            } catch (err) {
-                this.error = err.message || 'Terjadi error tidak terduga.';
-            } finally {
-                this.loading = false;
-            }
-        },
-
-        async generateKey() {
-            this.loading = true;
-            try {
-                const res = await fetch('{{ route("chacha20.keygen") }}');
-                const data = await res.json();
-                this.key = data.key_hex;
-                this.nonce = data.nonce_hex;
-            } catch {
-                this.error = 'Gagal generate key. Pastikan microservice berjalan.';
-            } finally {
-                this.loading = false;
-            }
-        },
-
-        async doEncrypt() {
-            const body = {
-                plaintext: this.plaintext,
-                counter: parseInt(this.counter) || 1,
-                show_rounds: this.showRounds,
-            };
-            if (this.key) body.key = this.key;
-            if (this.nonce) body.nonce = this.nonce;
-
-            const data = await this.apiPost('{{ route("chacha20.encrypt") }}', body);
-            this.result = data;
-            // Simpan key/nonce yang dipakai untuk kemudahan dekripsi
-            this.key = data.key_hex;
-            this.nonce = data.nonce_hex;
-        },
-
-        async doDecrypt() {
-            if (!this.ciphertextInput) throw new Error('Ciphertext tidak boleh kosong.');
-            if (!this.key) throw new Error('Key wajib diisi untuk dekripsi.');
-            if (!this.nonce) throw new Error('Nonce wajib diisi untuk dekripsi.');
-
-            const data = await this.apiPost('{{ route("chacha20.decrypt") }}', {
-                ciphertext_hex: this.ciphertextInput.trim(),
-                key: this.key,
-                nonce: this.nonce,
-                counter: parseInt(this.counter) || 1,
-                show_rounds: this.showRounds,
-            });
-            this.result = data;
-        },
-
-        async doSteps() {
-            if (!this.plaintext) throw new Error('Plaintext diperlukan untuk visualisasi.');
-
-            const body = {
-                plaintext: this.plaintext,
-                counter: parseInt(this.counter) || 1,
-            };
-            if (this.key) body.key = this.key;
-            if (this.nonce) body.nonce = this.nonce;
-
-            const data = await this.apiPost('{{ route("chacha20.steps") }}', body);
-            this.stepsData = data;
-            this.key = data.key_hex;
-            this.nonce = data.nonce_hex;
-            this.buildRoundList(data);
-        },
-
-        buildRoundList(data) {
-            this.allRounds = [
-                data.initial_state,
-                ...data.round_summaries,
-                data.final_state,
-            ].filter(Boolean);
-
-            this.currentRoundIndex = 0;
-            this.displayRound(0);
-        },
-
-        displayRound(idx) {
-            const entry = this.allRounds[idx];
-            if (!entry) return;
-
-            this.currentRound = entry.round;
-            this.currentStateWords = entry.state_words ?? [];
-            this.currentRoundLabel = entry.description ?? '';
-
-            // Highlight kata yang berubah dibanding ronde sebelumnya
-            if (idx > 0) {
-                const prev = this.allRounds[idx - 1].state_words ?? [];
-                this.changedIndices = this.currentStateWords
-                    .map((w, i) => w !== prev[i] ? i : -1)
-                    .filter(i => i >= 0);
-            } else {
-                this.changedIndices = [];
-            }
-        },
-
-        goToRound(round) {
-            const idx = this.allRounds.findIndex(r => r?.round === round);
-            if (idx >= 0) {
-                this.currentRoundIndex = idx;
-                this.displayRound(idx);
-            }
-        },
-
-        prevRound() {
-            if (this.currentRoundIndex > 0) {
-                this.currentRoundIndex--;
-                this.displayRound(this.currentRoundIndex);
-            }
-        },
-
-        nextRound() {
-            if (this.currentRoundIndex < this.allRounds.length - 1) {
-                this.currentRoundIndex++;
-                this.displayRound(this.currentRoundIndex);
-            }
-        },
-
-        async apiPost(url, body) {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': this.csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify(body),
-            });
-            const data = await res.json();
-
-            if (!res.ok) {
-                // Tampilkan pesan validasi Laravel jika ada
-                if (data.errors) {
-                    const msgs = Object.values(data.errors).flat().join(' ');
-                    throw new Error(msgs);
-                }
-                throw new Error(data.message || data.error || 'API Error');
-            }
-            return data;
-        },
-    };
-}
-</script>
-</body>
-</html>
+print("Patch applied successfully.")
